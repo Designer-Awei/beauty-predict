@@ -20,6 +20,7 @@ export default function Home() {
   const mainUploadInputRef = useRef<HTMLInputElement>(null);
   const dashedBoxRef = useRef<HTMLDivElement>(null);
   const [referenceImages, setReferenceImages] = useState<{ src: string; label: string }[]>([]);
+  const [color, setColor] = useState("#FFFFFF");
 
   useEffect(() => {
     fetch('/api/user_public_list')
@@ -83,6 +84,39 @@ export default function Home() {
       setCustomRef(url);
       setSelectedRef(url);
     }
+  };
+
+  // 颜色输入框同步色板，支持互操作
+  const hexToRgb = (hex: string) => {
+    let c = hex.replace('#', '');
+    if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    const num = parseInt(c, 16);
+    return `${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}`;
+  };
+  const rgbToHex = (rgb: string) => {
+    const arr = rgb.split(',').map(s => parseInt(s.trim(), 10));
+    if (arr.length !== 3 || arr.some(isNaN)) return color;
+    return (
+      '#' +
+      arr
+        .map(x => {
+          const v = Math.max(0, Math.min(255, x));
+          return v.toString(16).padStart(2, '0');
+        })
+        .join('')
+        .toUpperCase()
+    );
+  };
+  const [colorInput, setColorInput] = useState(hexToRgb(color));
+  // 互操作：色板变动时同步输入框
+  useEffect(() => {
+    setColorInput(hexToRgb(color));
+  }, [color]);
+  // 互操作：输入框变动时同步色板
+  const handleColorInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setColorInput(e.target.value);
+    const hex = rgbToHex(e.target.value);
+    if (/^#[0-9A-Fa-f]{6}$/.test(hex)) setColor(hex);
   };
 
   return (
@@ -243,8 +277,8 @@ export default function Home() {
             <span className={styles.sizeUnit}>px</span>
             <span className={styles.colorLabel}>颜色</span>
             <div className={styles.colorInputWrap}>
-              <input type="text" defaultValue="#FFFFFF" className={styles.colorInput} />
-              <input type="color" defaultValue="#FFFFFF" className={styles.colorPicker} />
+              <input type="text" value={colorInput} onChange={handleColorInputChange} className={styles.colorInput} />
+              <input type="color" value={color} onChange={e => setColor(e.target.value)} className={styles.colorPicker} />
             </div>
           </div>
           <button className={styles.exportBtn} title="导出">
