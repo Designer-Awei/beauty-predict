@@ -24,6 +24,61 @@
   border-bottom: 1px solid #e0e0e0;
   padding: 16px;
   border-radius: 0;
+  background: none;
+}
+
+.dashedUploadBox {
+  width: 100%;
+  height: 180px;
+  min-height: 120px;
+  max-height: 180px;
+  min-width: 180px;
+  border: 2px dashed #b3b3b3;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafbfc;
+  transition: border-color 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.dashedUploadBox:hover {
+  border-color: #1976d2;
+}
+
+.dashedUploadBox img {
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+.uploadLabelContent {
+  display: flex;
+  align-items: center;
+  font-size: 18px;
+  gap: 8px;
+  color: #1976d2;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sizeInput {
+  width: 48px;
+  margin: 0 8px;
+  border: 1.5px solid #1976d2;
+  border-radius: 6px;
+  height: 28px;
+  text-align: center;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.sizeInput:focus {
+  border-color: #1565c0;
 }
 
 .referenceArea {
@@ -38,7 +93,7 @@
 }
 
 .referenceList {
-  width: 80px;
+  width: 100px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -48,7 +103,7 @@
   border-right: 3px solid #e0e0e0;
   align-items: center;
   justify-content: flex-start;
-  height: 100%;
+  height: 340px;
   box-sizing: border-box;
   overflow-y: auto;
 }
@@ -148,13 +203,112 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 24px 0 24px;
-  height: 48px;
+  height: 56px;
+  background: #ededed;
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1.5px solid #bdbdbd;
 }
 
 .tools {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.toolBtn {
+  background: #fff;
+  border: 1.5px solid #bdbdbd;
+  border-radius: 5px;
+  width: 40px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  font-size: 20px;
+  margin-right: 2px;
+  padding: 0;
+}
+.toolBtn.selected, .toolBtn:active {
+  border-color: #1976d2;
+  box-shadow: 0 0 0 2px #b3d4fc;
+}
+
+.sizeLabel {
+  font-size: 15px;
+  margin-left: 8px;
+  margin-right: 2px;
+}
+
+.sizeInput {
+  width: 48px;
+  border: 1.5px solid #bdbdbd;
+  border-radius: 5px;
+  height: 28px;
+  text-align: center;
+  font-size: 15px;
+  outline: none;
+  margin-right: 2px;
+  transition: border-color 0.2s;
+}
+.sizeInput:focus {
+  border-color: #1976d2;
+}
+.sizeUnit {
+  font-size: 14px;
+  color: #888;
+  margin-right: 10px;
+}
+
+.colorLabel {
+  font-size: 15px;
+  margin-right: 2px;
+}
+
+.colorInputWrap {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1.5px solid #bdbdbd;
+  border-radius: 5px;
+  height: 28px;
+  padding: 0 4px;
+  margin-right: 2px;
+}
+.colorInput {
+  width: 80px;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  background: transparent;
+  margin-right: 4px;
+}
+.colorPicker {
+  width: 28px;
+  height: 22px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.exportBtn {
+  font-size: 16px;
+  border-radius: 5px;
+  border: 1.5px solid #bdbdbd;
+  padding: 4px 18px;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  height: 28px;
+}
+.exportBtn:active, .exportBtn.selected {
+  border-color: #1976d2;
+  box-shadow: 0 0 0 2px #b3d4fc;
 }
 
 .canvasArea {
