@@ -20,7 +20,22 @@ export default function Home() {
   const mainUploadInputRef = useRef<HTMLInputElement>(null);
   const dashedBoxRef = useRef<HTMLDivElement>(null);
   const [referenceImages, setReferenceImages] = useState<{ src: string; label: string }[]>([]);
-  const [color, setColor] = useState("#FFFFFF");
+  const [color, setColor] = useState("#000000");
+  const [canvasImage, setCanvasImage] = useState<string | null>(null);
+  const [canvasImgScale, setCanvasImgScale] = useState(1);
+  const [canvasImgOffset, setCanvasImgOffset] = useState({ x: 0, y: 0 });
+  const [canvasDragging, setCanvasDragging] = useState(false);
+  const [canvasDragStart, setCanvasDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [canvasImgStartOffset, setCanvasImgStartOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const canvasBoxRef = useRef<HTMLDivElement>(null);
+  // 工具栏状态
+  const [tool, setTool] = useState<'pen' | 'eraser' | null>(null);
+  // 画布属性
+  const [penSize, setPenSize] = useState(4);
+  const [penColor, setPenColor] = useState('rgb(0,0,0)');
+  // 撤销栈
+  const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     fetch('/api/user_public_list')
@@ -49,15 +64,23 @@ export default function Home() {
     if (mainUploadInputRef.current) mainUploadInputRef.current.value = "";
   };
 
-  // 缩放和拖动事件
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    if (mainImage) {
-      e.preventDefault();
-      let newScale = mainImgScale - e.deltaY * 0.0015;
-      newScale = Math.max(0.2, Math.min(5, newScale));
-      setMainImgScale(newScale);
-    }
-  };
+  // 缩放和拖动事件（wheel用原生事件监听，防止passive警告）
+  useEffect(() => {
+    const box = dashedBoxRef.current;
+    if (!box) return;
+    const wheelHandler = (e: WheelEvent) => {
+      if (mainImage) {
+        e.preventDefault();
+        let newScale = mainImgScale - e.deltaY * 0.0015;
+        newScale = Math.max(0.2, Math.min(5, newScale));
+        setMainImgScale(newScale);
+      }
+    };
+    box.addEventListener("wheel", wheelHandler, { passive: false });
+    return () => {
+      box.removeEventListener("wheel", wheelHandler);
+    };
+  }, [mainImage, mainImgScale]);
   const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
     if (mainImage && e.button === 0 && e.nativeEvent.buttons === 1) {
       setDragging(true);
@@ -119,6 +142,167 @@ export default function Home() {
     if (/^#[0-9A-Fa-f]{6}$/.test(hex)) setColor(hex);
   };
 
+  // 载入画布
+  const handleLoadToCanvas = () => {
+    if (mainImage) {
+      setCanvasImage(mainImage);
+      setCanvasImgScale(1);
+      setCanvasImgOffset({ x: 0, y: 0 });
+    }
+  };
+  // 画布缩放
+  useEffect(() => {
+    const box = canvasBoxRef.current;
+    if (!box) return;
+    const wheelHandler = (e: WheelEvent) => {
+      if (canvasImage) {
+        e.preventDefault();
+        let newScale = canvasImgScale - e.deltaY * 0.0015;
+        newScale = Math.max(0.2, Math.min(5, newScale));
+        setCanvasImgScale(newScale);
+      }
+    };
+    box.addEventListener("wheel", wheelHandler, { passive: false });
+    return () => {
+      box.removeEventListener("wheel", wheelHandler);
+    };
+  }, [canvasImage, canvasImgScale]);
+  // 画布拖动
+  const handleCanvasDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (canvasImage && e.button === 0 && e.nativeEvent.buttons === 1) {
+      setCanvasDragging(true);
+      setCanvasDragStart({ x: e.clientX, y: e.clientY });
+      setCanvasImgStartOffset({ ...canvasImgOffset });
+    }
+  };
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (canvasDragging && canvasDragStart) {
+      const dx = e.clientX - canvasDragStart.x;
+      const dy = e.clientY - canvasDragStart.y;
+      setCanvasImgOffset({ x: canvasImgStartOffset.x + dx, y: canvasImgStartOffset.y + dy });
+    }
+  };
+  const handleCanvasMouseUp = () => {
+    setCanvasDragging(false);
+    setCanvasDragStart(null);
+  };
+
+  // 清空画布
+  const handleClearCanvas = () => {
+    setCanvasImage(null);
+    setCanvasImgScale(1);
+    setCanvasImgOffset({ x: 0, y: 0 });
+  };
+
+  // 工具栏按钮选中逻辑
+  const handleSelectTool = (t: 'pen' | 'eraser') => setTool(t);
+  // 画笔属性同步
+  useEffect(() => {
+    setPenSize(Number((document.querySelector('.' + styles.sizeInput) as HTMLInputElement)?.value) || 4);
+  }, [tool]);
+  useEffect(() => {
+    setPenColor(color ? `rgb(${hexToRgb(color)})` : 'rgb(0,0,0)');
+  }, [color]);
+
+  // 画布绘制逻辑
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    let drawing = false;
+    let lastX = 0, lastY = 0;
+    let saved = false;
+    // 鼠标事件
+    const getPos = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      // 画布中心点
+      const cx = rect.left + 300;
+      const cy = rect.top + 300;
+      // 鼠标相对中心点的偏移
+      const dx = e.clientX - cx - canvasImgOffset.x;
+      const dy = e.clientY - cy - canvasImgOffset.y;
+      // 反算到原始canvas坐标
+      const x = 300 + dx / canvasImgScale;
+      const y = 300 + dy / canvasImgScale;
+      return { x, y };
+    };
+    const mousedown = (e: MouseEvent) => {
+      if (!tool) return;
+      drawing = true;
+      const { x, y } = getPos(e);
+      lastX = x; lastY = y;
+      if (!saved) {
+        setCanvasHistory(h => [...h, canvas.toDataURL()]);
+        saved = true;
+      }
+    };
+    const mousemove = (e: MouseEvent) => {
+      if (!drawing || !tool) return;
+      const { x, y } = getPos(e);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = penSize;
+      if (tool === 'pen') {
+        ctx.strokeStyle = penColor;
+        ctx.globalCompositeOperation = 'source-over';
+      } else {
+        ctx.strokeStyle = 'rgba(0,0,0,1)'; // destination-out时颜色无影响
+        ctx.globalCompositeOperation = 'destination-out';
+      }
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      lastX = x; lastY = y;
+    };
+    const mouseup = () => {
+      drawing = false;
+      saved = false;
+      ctx.globalCompositeOperation = 'source-over';
+    };
+    canvas.addEventListener('mousedown', mousedown);
+    canvas.addEventListener('mousemove', mousemove);
+    window.addEventListener('mouseup', mouseup);
+    // 鼠标样式
+    const setCursor = (e: MouseEvent) => {
+      if (!tool) {
+        canvas.style.cursor = '';
+        return;
+      }
+      const size = penSize;
+      const color = tool === 'pen' ? penColor : '#fff';
+      const svg = encodeURIComponent(`<svg width='${size}' height='${size}' xmlns='http://www.w3.org/2000/svg'><circle cx='${size/2}' cy='${size/2}' r='${size/2-1}' fill='${color}' stroke='${tool==='pen'?'#333':'#aaa'}' stroke-width='1'/></svg>`);
+      canvas.style.cursor = `url("data:image/svg+xml,${svg}") ${size/2} ${size/2}, crosshair`;
+    };
+    canvas.addEventListener('mousemove', setCursor);
+    // Esc退出工具
+    const escListener = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTool(null);
+      if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+        setCanvasHistory(h => {
+          if (h.length === 0) return h;
+          const prev = h[h.length - 1];
+          const img = new window.Image();
+          img.onload = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          };
+          img.src = prev;
+          return h.slice(0, -1);
+        });
+      }
+    };
+    window.addEventListener('keydown', escListener);
+    return () => {
+      canvas.removeEventListener('mousedown', mousedown);
+      canvas.removeEventListener('mousemove', mousemove);
+      window.removeEventListener('mouseup', mouseup);
+      canvas.removeEventListener('mousemove', setCursor);
+      window.removeEventListener('keydown', escListener);
+    };
+  }, [tool, penSize, penColor, canvasImgScale, canvasImgOffset]);
+
   return (
     <div className={styles.container}>
       {/* 左侧面板 */}
@@ -129,7 +313,6 @@ export default function Home() {
             className={styles.dashedUploadBox}
             style={{ position: 'relative', overflow: 'hidden' }}
             ref={dashedBoxRef}
-            onWheel={handleWheel}
             onMouseDown={handleDragStart}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
@@ -266,14 +449,14 @@ export default function Home() {
         {/* 工具栏 */}
         <div className={styles.canvasHeader}>
           <div className={styles.tools}>
-            <button className={styles.toolBtn} title="画笔">
+            <button className={styles.toolBtn + (tool === 'pen' ? ' ' + styles.selected : '')} title="画笔" onClick={() => handleSelectTool('pen')}>
               <Pencil size={22} color="#1976d2" />
             </button>
-            <button className={styles.toolBtn} title="橡皮擦">
+            <button className={styles.toolBtn + (tool === 'eraser' ? ' ' + styles.selected : '')} title="橡皮擦" onClick={() => handleSelectTool('eraser')}>
               <Eraser size={22} color="#1976d2" />
             </button>
             <span className={styles.sizeLabel}>大小</span>
-            <input type="number" min={1} max={20} defaultValue={4} className={styles.sizeInput} />
+            <input type="number" min={1} max={20} defaultValue={4} className={styles.sizeInput} onChange={e => setPenSize(Number(e.target.value))} />
             <span className={styles.sizeUnit}>px</span>
             <span className={styles.colorLabel}>颜色</span>
             <div className={styles.colorInputWrap}>
@@ -286,11 +469,68 @@ export default function Home() {
           </button>
         </div>
         {/* 画布与结果区 */}
-        <div className={styles.canvasArea}>
-          <span style={{ color: '#666', fontSize: 24 }}>画布与结果呈现区</span>
+        <div
+          className={styles.canvasArea}
+          ref={canvasBoxRef}
+          style={{
+            position: 'relative',
+            background: '#e0e0e0',
+            overflow: 'hidden',
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          onMouseDown={tool ? undefined : handleCanvasDragStart}
+          onMouseMove={tool ? undefined : handleCanvasMouseMove}
+          onMouseUp={tool ? undefined : handleCanvasMouseUp}
+        >
+          {/* 画布绘制层 */}
+          <canvas
+            ref={canvasRef}
+            width={600}
+            height={600}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: 600,
+              height: 600,
+              zIndex: 2,
+              pointerEvents: tool ? 'auto' : 'none',
+              background: 'transparent',
+              transform: `translate(-50%, -50%) scale(${canvasImgScale}) translate(${canvasImgOffset.x / canvasImgScale}px, ${canvasImgOffset.y / canvasImgScale}px)`
+            }}
+          />
+          {canvasImage ? (
+            <img
+              src={canvasImage}
+              alt="画布底图"
+              style={{
+                maxHeight: 600,
+                maxWidth: 600,
+                objectFit: 'contain',
+                display: 'block',
+                margin: '0 auto',
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                width: 600,
+                height: 600,
+                transform: `translate(-50%, -50%) scale(${canvasImgScale}) translate(${canvasImgOffset.x / canvasImgScale}px, ${canvasImgOffset.y / canvasImgScale}px)`,
+                zIndex: 1
+              }}
+              draggable={false}
+            />
+          ) : (
+            <span style={{ color: '#666', fontSize: 24 }}>画布与结果呈现区</span>
+          )}
         </div>
         {/* 操作按钮区 */}
         <div className={styles.canvasFooter}>
+          <button className={styles.actionBtn} onClick={handleLoadToCanvas}>载入画布</button>
+          <button className={styles.actionBtn} onClick={handleClearCanvas}>清空画布</button>
           <button className={styles.actionBtn}>实时拍摄</button>
           <button className={styles.actionBtn}>效果生成</button>
           <button className={styles.actionBtn}>作为底图</button>

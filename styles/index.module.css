@@ -196,6 +196,9 @@
   flex-direction: column;
   height: 100%;
   background: #f9f9f9;
+  padding-left: 24px;
+  padding-right: 24px;
+  box-sizing: border-box;
 }
 
 .canvasHeader {
@@ -313,21 +316,24 @@
 
 .canvasArea {
   flex: 1;
-  margin: 12px 24px 0 24px;
+  margin: 12px 0 0 0;
   background: #e0e0e0;
   border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 400px;
+  position: relative;
+  overflow: hidden;
 }
 
 .canvasFooter {
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
   gap: 32px;
   padding: 16px 0 24px 0;
+  box-sizing: border-box;
 }
 
 .actionBtn {

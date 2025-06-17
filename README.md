@@ -144,3 +144,21 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/b
 - 各区域布局比例严格参考原型图，保证视觉一致性。
 
 ---
+
+## 技术栈说明
+
+### 前端
+- **Next.js**：基于React的服务端渲染与静态网站生成框架
+- **React**：现代化组件式前端开发框架
+- **TypeScript**：类型安全的JavaScript超集
+- **HTML5 & CSS3**：页面结构与样式基础
+- **CSS Modules**：局部作用域CSS，提升样式可维护性
+- **shadcn/ui**：现代化UI组件库（部分交互与风格）
+- **lucide-react**：现代化图标库
+
+### 后端
+- **Node.js**：JavaScript运行环境
+- **Next.js API Routes**：后端接口实现（如图片列表、模型调用等）
+- **fs/path**：Node内置文件系统与路径模块（用于API读取本地图片）
+
+---
