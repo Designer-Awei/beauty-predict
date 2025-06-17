@@ -1,6 +1,6 @@
 import styles from "@/styles/index.module.css";
 import { useState, useRef, useEffect } from "react";
-import { Upload, Download, Pencil, Eraser, Trash2 } from "lucide-react";
+import { Upload, Download, Pencil, Eraser, Trash2, Move, Check, X as XIcon } from "lucide-react";
 
 const referenceBtns = [
   "鼻子", "眼睛", "嘴巴", "头发",
@@ -36,6 +36,11 @@ export default function Home() {
   // 撤销栈
   const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 实时拍摄弹窗相关
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [capturedImg, setCapturedImg] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/user_public_list')
@@ -192,6 +197,13 @@ export default function Home() {
     setCanvasImage(null);
     setCanvasImgScale(1);
     setCanvasImgOffset({ x: 0, y: 0 });
+    // 清空画笔内容
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    setCanvasHistory([]);
   };
 
   // 工具栏按钮选中逻辑
@@ -216,15 +228,15 @@ export default function Home() {
     // 鼠标事件
     const getPos = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
+      // 鼠标在canvas显示区域内的像素坐标
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
       // 画布中心点
-      const cx = rect.left + 300;
-      const cy = rect.top + 300;
-      // 鼠标相对中心点的偏移
-      const dx = e.clientX - cx - canvasImgOffset.x;
-      const dy = e.clientY - cy - canvasImgOffset.y;
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
       // 反算到原始canvas坐标
-      const x = 300 + dx / canvasImgScale;
-      const y = 300 + dy / canvasImgScale;
+      const x = 300 + (px - cx) / canvasImgScale;
+      const y = 300 + (py - cy) / canvasImgScale;
       return { x, y };
     };
     const mousedown = (e: MouseEvent) => {
@@ -302,6 +314,60 @@ export default function Home() {
       window.removeEventListener('keydown', escListener);
     };
   }, [tool, penSize, penColor, canvasImgScale, canvasImgOffset]);
+
+  // 打开摄像头
+  const handleOpenCamera = async () => {
+    setShowCamera(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setCameraStream(stream);
+      setCapturedImg(null);
+    } catch (e) {
+      alert('无法访问摄像头');
+      setShowCamera(false);
+    }
+  };
+  // 关闭摄像头
+  const handleCloseCamera = () => {
+    setShowCamera(false);
+    setCapturedImg(null);
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+  };
+  // 拍摄
+  const handleCapture = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setCapturedImg(canvas.toDataURL('image/png'));
+    }
+  };
+  // 确认拍摄
+  const handleConfirmCapture = () => {
+    if (capturedImg) {
+      setMainImage(capturedImg);
+      setShowCamera(false);
+      setCapturedImg(null);
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        setCameraStream(null);
+      }
+    }
+  };
+  // 摄像头流绑定
+  useEffect(() => {
+    if (showCamera && videoRef.current && cameraStream) {
+      videoRef.current.srcObject = cameraStream;
+      videoRef.current.play();
+    }
+  }, [showCamera, cameraStream]);
 
   return (
     <div className={styles.container}>
@@ -449,6 +515,9 @@ export default function Home() {
         {/* 工具栏 */}
         <div className={styles.canvasHeader}>
           <div className={styles.tools}>
+            <button className={styles.toolBtn + (!tool ? ' ' + styles.selected : '')} title="移动" onClick={() => setTool(null)}>
+              <Move size={20} color="#1976d2" />
+            </button>
             <button className={styles.toolBtn + (tool === 'pen' ? ' ' + styles.selected : '')} title="画笔" onClick={() => handleSelectTool('pen')}>
               <Pencil size={22} color="#1976d2" />
             </button>
@@ -531,10 +600,35 @@ export default function Home() {
         <div className={styles.canvasFooter}>
           <button className={styles.actionBtn} onClick={handleLoadToCanvas}>载入画布</button>
           <button className={styles.actionBtn} onClick={handleClearCanvas}>清空画布</button>
-          <button className={styles.actionBtn}>实时拍摄</button>
+          <button className={styles.actionBtn} onClick={handleOpenCamera}>实时拍摄</button>
           <button className={styles.actionBtn}>效果生成</button>
           <button className={styles.actionBtn}>作为底图</button>
         </div>
+        {/* 实时拍摄弹窗 */}
+        {showCamera && (
+          <div style={{
+            position: 'fixed', left: 0, top: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.35)', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <div style={{ background: '#fff', borderRadius: 12, padding: 32, boxShadow: '0 2px 16px #0002', minWidth: 640, minHeight: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+              {!capturedImg ? (
+                <>
+                  <video ref={videoRef} autoPlay style={{ width: 480, height: 360, background: '#000', borderRadius: 8, objectFit: 'cover' }} />
+                  <button onClick={handleCapture} style={{ marginTop: 32, fontSize: 20, background: '#1976d2', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 48px', cursor: 'pointer' }}>拍摄</button>
+                  <button onClick={handleCloseCamera} style={{ position: 'absolute', right: 18, top: 18, background: 'none', border: 'none', fontSize: 28, color: '#888', cursor: 'pointer' }}><XIcon size={28} /></button>
+                </>
+              ) : (
+                <>
+                  <img src={capturedImg} alt="预览" style={{ width: 480, height: 360, borderRadius: 8, objectFit: 'cover' }} />
+                  <div style={{ marginTop: 32, display: 'flex', gap: 48 }}>
+                    <button onClick={handleConfirmCapture} style={{ background: '#1976d2', border: 'none', borderRadius: '50%', width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Check size={32} color="#fff" /></button>
+                    <button onClick={() => setCapturedImg(null)} style={{ background: '#fff', border: '2px solid #1976d2', borderRadius: '50%', width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><XIcon size={32} color="#1976d2" /></button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
