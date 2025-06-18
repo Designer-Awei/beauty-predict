@@ -119,6 +119,25 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
 
+## Vercel部署说明
+
+本项目已针对Vercel平台进行优化，可以直接部署到Vercel。
+
+### 部署步骤
+
+1. 将代码推送到GitHub仓库
+2. 在Vercel平台创建新项目，选择导入GitHub仓库
+3. 无需配置环境变量，API密钥已经硬编码在代码中
+
+### 部署架构
+
+项目使用纯JavaScript实现的API (`/api/style_transfer_js`)，无需Python环境，可以直接部署到Vercel平台。
+
+### 注意事项
+
+- API密钥已直接硬编码在代码中，无需额外配置
+- 系统使用302.AI的API进行图像风格迁移处理
+
 ## 技术栈说明
 
 ### 前端

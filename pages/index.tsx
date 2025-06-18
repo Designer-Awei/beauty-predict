@@ -70,6 +70,10 @@ export default function Home() {
   const [capturedImg, setCapturedImg] = useState<string | null>(null);
   // 参考区域多选状态
   const [selectedBtns, setSelectedBtns] = useState<number[]>([]);
+  // 添加处理状态
+  const [isProcessing, setIsProcessing] = useState(false);
+  // 在适当位置添加一个新的状态变量，用于控制是否使用Vercel兼容的API
+  const [useVercelApi, setUseVercelApi] = useState<boolean>(true);
 
   useEffect(() => {
     fetch('/api/user_public_list')
@@ -432,52 +436,115 @@ export default function Home() {
       alert('请上传底图、选择参考图和参考区域');
       return;
     }
-    // 构造参考区域英文
-    const selectedRegionsEn = selectedBtns.map(i => regionMap[referenceBtns[i]]);
-    // 优化后的英文prompt
-    const prompt = `Please use the first image as the base image, and the second image as the reference image. Transfer the features of the selected regions [${selectedRegionsEn.join(', ')}] from the reference image to the base image, while keeping other areas unchanged.`;
 
-    // 收集底图和所有参考图（支持多选参考图扩展）
-    const images: File[] = [];
-    // 处理底图
-    if (mainImage.startsWith('data:')) {
-      images.push(dataURLtoFile(mainImage, 'base.png'));
-    } else {
-      // url转blob再转File
-      const blob = await fetch(mainImage).then(r => r.blob());
-      images.push(new File([blob], 'base.png', { type: blob.type }));
-    }
-    // 处理参考图（目前只支持单选，可扩展多选）
-    if (selectedRef.startsWith('data:')) {
-      images.push(dataURLtoFile(selectedRef, 'ref.png'));
-    } else {
-      const blob = await fetch(selectedRef).then(r => r.blob());
-      images.push(new File([blob], 'ref.png', { type: blob.type }));
-    }
-
-    // 构造FormData
-    const formData = new FormData();
-    images.forEach(file => formData.append('image', file));
-    formData.append('prompt', prompt);
-
+    setIsProcessing(true);
     try {
-      const res = await fetch('/api/style_transfer', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (data.image) {
-        // 判断是url还是base64
-        if (data.image.startsWith('http')) {
-          setCanvasImage(data.image);
-        } else {
-          setCanvasImage('data:image/png;base64,' + data.image);
-        }
+      // 构造参考区域英文
+      const selectedRegionsEn = selectedBtns.map(i => regionMap[referenceBtns[i]]);
+      // 优化后的英文prompt
+      const prompt = `Please use the first image as the base image, and the second image as the reference image. Transfer the features of the selected regions [${selectedRegionsEn.join(', ')}] from the reference image to the base image, while keeping other areas unchanged.`;
+
+      // 收集底图和所有参考图（支持多选参考图扩展）
+      const images: File[] = [];
+      // 处理底图
+      if (mainImage.startsWith('data:')) {
+        images.push(dataURLtoFile(mainImage, 'base.png'));
       } else {
-        alert('生成失败：' + (data.error || '未知错误'));
+        // url转blob再转File
+        const blob = await fetch(mainImage).then(r => r.blob());
+        images.push(new File([blob], 'base.png', { type: blob.type }));
+      }
+      // 处理参考图（目前只支持单选，可扩展多选）
+      if (selectedRef.startsWith('data:')) {
+        images.push(dataURLtoFile(selectedRef, 'ref.png'));
+      } else {
+        const blob = await fetch(selectedRef).then(r => r.blob());
+        images.push(new File([blob], 'ref.png', { type: blob.type }));
+      }
+
+      // 构造FormData
+      const formData = new FormData();
+      images.forEach(file => formData.append('image', file));
+      formData.append('prompt', prompt);
+
+      // 使用JS版API
+      const apiEndpoint = '/api/style_transfer_js';
+      console.log(`使用API: ${apiEndpoint}`);
+
+      // 添加前端重试逻辑
+      const maxRetries = 2; // 前端最大重试次数
+      let retries = 0;
+      let success = false;
+      let lastError = null;
+
+      while (retries <= maxRetries && !success) {
+        try {
+          if (retries > 0) {
+            console.log(`前端重试 ${retries}/${maxRetries}...`);
+            // 更新处理中提示
+            const processingElement = document.querySelector('[data-processing-message]') as HTMLElement;
+            if (processingElement) {
+              processingElement.innerText = `正在生成效果，第${retries+1}次尝试...`;
+            }
+            // 等待一段时间再重试
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+
+          const res = await fetch(apiEndpoint, {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (!res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData.error || '服务器返回错误');
+          }
+          
+          const data = await res.json();
+          
+          // 简化处理逻辑，只处理URL
+          if (data.image) {
+            // API返回URL格式的图片
+            setCanvasImage(data.image);
+            success = true;
+          } else {
+            throw new Error('生成失败：' + (data.error || '未知错误'));
+          }
+        } catch (e) {
+          lastError = e;
+          retries++;
+          if (retries > maxRetries) {
+            console.error('达到最大重试次数，放弃重试');
+            break;
+          }
+        }
+      }
+
+      if (!success && lastError) {
+        // 提取更友好的错误信息
+        let errorMessage = String(lastError);
+        
+        // 检查是否包含网络错误信息
+        if (errorMessage.includes('网络连接错误') || errorMessage.includes('Network error')) {
+          alert('生成失败：网络连接错误，请检查您的网络连接或稍后再试');
+        } 
+        // 检查是否包含超时信息
+        else if (errorMessage.includes('超时') || errorMessage.includes('timeout')) {
+          alert('生成失败：请求超时，服务器响应时间过长，请稍后再试');
+        }
+        // API服务器错误
+        else if (errorMessage.includes('API服务器错误')) {
+          alert('生成失败：302.AI服务器暂时不可用，请稍后再试');
+        }
+        // 其他错误
+        else {
+          alert('生成失败：' + errorMessage);
+        }
       }
     } catch (e) {
       alert('调用失败：' + e);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -606,7 +673,7 @@ export default function Home() {
         </div>
         {/* 选择参考区域 */}
         <div className={styles.selectArea}>
-          <div style={{ width: '90%', textAlign: 'left', fontSize: 15, fontWeight: 500, marginBottom: 6 }}>
+          <div style={{ width: '90%', textAlign: 'left', fontSize: 15, fontWeight: 500 }}>
             选择参考区域
           </div>
           <div className={styles.selectBtns}>
@@ -707,13 +774,49 @@ export default function Home() {
           ) : (
             <span style={{ color: '#666', fontSize: 24 }}>画布与结果呈现区</span>
           )}
+          
+          {/* 添加处理中遮罩 */}
+          {isProcessing && (
+            <div style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(255,255,255,0.7)',
+              zIndex: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <div style={{ marginBottom: 20, fontSize: 18 }} data-processing-message>正在生成效果，请稍候...</div>
+              <div style={{ marginBottom: 15, fontSize: 14, color: '#666', maxWidth: '80%', textAlign: 'center' }}>
+                如遇到服务器繁忙或网络错误，系统会自动重试，请耐心等待
+              </div>
+              <div style={{ width: 50, height: 50, border: '5px solid #f3f3f3', borderTop: '5px solid #1976d2', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+              <style jsx>{`
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              `}</style>
+            </div>
+          )}
         </div>
         {/* 操作按钮区 */}
         <div className={styles.canvasFooter}>
           <button className={styles.actionBtn} onClick={handleLoadToCanvas}>载入画布</button>
           <button className={styles.actionBtn} onClick={handleClearCanvas}>清空画布</button>
           <button className={styles.actionBtn} onClick={handleOpenCamera}>实时拍摄</button>
-          <button className={styles.actionBtn} onClick={handleEffectGenerate}>效果生成</button>
+          <button 
+            className={styles.actionBtn} 
+            onClick={handleEffectGenerate}
+            disabled={isProcessing}
+            style={{ opacity: isProcessing ? 0.7 : 1 }}
+          >
+            {isProcessing ? '生成中...' : '效果生成'}
+          </button>
           <button className={styles.actionBtn}>作为底图</button>
         </div>
         {/* 实时拍摄弹窗 */}
