@@ -7,6 +7,33 @@ const referenceBtns = [
   "背景", "脸颊", "颈部", "衣服"
 ];
 
+// 参考区域英文映射
+const regionMap: Record<string, string> = {
+  '鼻子': 'nose',
+  '眼睛': 'eyes',
+  '嘴巴': 'mouth',
+  '头发': 'hair',
+  '背景': 'background',
+  '脸颊': 'cheeks',
+  '颈部': 'neck',
+  '衣服': 'clothes'
+};
+
+/**
+ * 将base64图片url转为File对象
+ * @param dataUrl base64图片url
+ * @param filename 文件名
+ * @returns File对象
+ */
+function dataURLtoFile(dataUrl: string, filename: string): File {
+  const arr = dataUrl.split(','), mime = arr[0].match(/:(.*?);/)![1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) u8arr[n] = bstr.charCodeAt(n);
+  return new File([u8arr], filename, { type: mime });
+}
+
 export default function Home() {
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [customRef, setCustomRef] = useState<string | null>(null);
@@ -41,6 +68,8 @@ export default function Home() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [capturedImg, setCapturedImg] = useState<string | null>(null);
+  // 参考区域多选状态
+  const [selectedBtns, setSelectedBtns] = useState<number[]>([]);
 
   useEffect(() => {
     fetch('/api/user_public_list')
@@ -361,6 +390,22 @@ export default function Home() {
       }
     }
   };
+  // 修复：取消后返回拍摄界面时自动初始化摄像头
+  const handleCancelCapture = async () => {
+    setCapturedImg(null);
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    // 重新初始化摄像头
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setCameraStream(stream);
+    } catch (e) {
+      alert('无法访问摄像头');
+      setShowCamera(false);
+    }
+  };
   // 摄像头流绑定
   useEffect(() => {
     if (showCamera && videoRef.current && cameraStream) {
@@ -368,6 +413,73 @@ export default function Home() {
       videoRef.current.play();
     }
   }, [showCamera, cameraStream]);
+
+  // 选择参考区域按钮多选逻辑
+  /**
+   * 处理参考区域按钮点击，多选/取消
+   * @param idx 按钮索引
+   */
+  const handleSelectBtn = (idx: number) => {
+    setSelectedBtns(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
+  };
+
+  // 效果生成API调用，上传多图片和prompt
+  /**
+   * 效果生成API调用，上传多图片和prompt
+   */
+  const handleEffectGenerate = async () => {
+    if (!mainImage || !selectedRef || selectedBtns.length === 0) {
+      alert('请上传底图、选择参考图和参考区域');
+      return;
+    }
+    // 构造参考区域英文
+    const selectedRegionsEn = selectedBtns.map(i => regionMap[referenceBtns[i]]);
+    // 优化后的英文prompt
+    const prompt = `Please use the first image as the base image, and the second image as the reference image. Transfer the features of the selected regions [${selectedRegionsEn.join(', ')}] from the reference image to the base image, while keeping other areas unchanged.`;
+
+    // 收集底图和所有参考图（支持多选参考图扩展）
+    const images: File[] = [];
+    // 处理底图
+    if (mainImage.startsWith('data:')) {
+      images.push(dataURLtoFile(mainImage, 'base.png'));
+    } else {
+      // url转blob再转File
+      const blob = await fetch(mainImage).then(r => r.blob());
+      images.push(new File([blob], 'base.png', { type: blob.type }));
+    }
+    // 处理参考图（目前只支持单选，可扩展多选）
+    if (selectedRef.startsWith('data:')) {
+      images.push(dataURLtoFile(selectedRef, 'ref.png'));
+    } else {
+      const blob = await fetch(selectedRef).then(r => r.blob());
+      images.push(new File([blob], 'ref.png', { type: blob.type }));
+    }
+
+    // 构造FormData
+    const formData = new FormData();
+    images.forEach(file => formData.append('image', file));
+    formData.append('prompt', prompt);
+
+    try {
+      const res = await fetch('/api/style_transfer', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.image) {
+        // 判断是url还是base64
+        if (data.image.startsWith('http')) {
+          setCanvasImage(data.image);
+        } else {
+          setCanvasImage('data:image/png;base64,' + data.image);
+        }
+      } else {
+        alert('生成失败：' + (data.error || '未知错误'));
+      }
+    } catch (e) {
+      alert('调用失败：' + e);
+    }
+  };
 
   return (
     <div className={styles.container}>
@@ -501,8 +613,8 @@ export default function Home() {
             {referenceBtns.map((btn, idx) => (
               <button
                 key={btn + idx}
-                className={styles.selectBtn + (selectedBtn === idx ? ' ' + styles.selected : '')}
-                onClick={() => setSelectedBtn(idx)}
+                className={styles.selectBtn + (selectedBtns.includes(idx) ? ' ' + styles.selected : '')}
+                onClick={() => handleSelectBtn(idx)}
               >
                 {btn}
               </button>
@@ -601,7 +713,7 @@ export default function Home() {
           <button className={styles.actionBtn} onClick={handleLoadToCanvas}>载入画布</button>
           <button className={styles.actionBtn} onClick={handleClearCanvas}>清空画布</button>
           <button className={styles.actionBtn} onClick={handleOpenCamera}>实时拍摄</button>
-          <button className={styles.actionBtn}>效果生成</button>
+          <button className={styles.actionBtn} onClick={handleEffectGenerate}>效果生成</button>
           <button className={styles.actionBtn}>作为底图</button>
         </div>
         {/* 实时拍摄弹窗 */}
@@ -610,19 +722,19 @@ export default function Home() {
             position: 'fixed', left: 0, top: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.35)', zIndex: 9999,
             display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}>
-            <div style={{ background: '#fff', borderRadius: 12, padding: 32, boxShadow: '0 2px 16px #0002', minWidth: 640, minHeight: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+            <div style={{ background: '#fff', borderRadius: 12, padding: '50px 50px 20px 50px', boxShadow: '0 2px 16px #0002', minWidth: 720, minHeight: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
               {!capturedImg ? (
                 <>
-                  <video ref={videoRef} autoPlay style={{ width: 480, height: 360, background: '#000', borderRadius: 8, objectFit: 'cover' }} />
-                  <button onClick={handleCapture} style={{ marginTop: 32, fontSize: 20, background: '#1976d2', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 48px', cursor: 'pointer' }}>拍摄</button>
+                  <video ref={videoRef} autoPlay style={{ width: 600, height: 360, background: '#000', borderRadius: 8, objectFit: 'cover' }} />
+                  <button onClick={handleCapture} style={{ marginTop: 20, fontSize: 20, background: '#1976d2', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 48px', cursor: 'pointer' }}>拍摄</button>
                   <button onClick={handleCloseCamera} style={{ position: 'absolute', right: 18, top: 18, background: 'none', border: 'none', fontSize: 28, color: '#888', cursor: 'pointer' }}><XIcon size={28} /></button>
                 </>
               ) : (
                 <>
-                  <img src={capturedImg} alt="预览" style={{ width: 480, height: 360, borderRadius: 8, objectFit: 'cover' }} />
+                  <img src={capturedImg} alt="预览" style={{ width: 600, height: 360, borderRadius: 8, objectFit: 'cover' }} />
                   <div style={{ marginTop: 32, display: 'flex', gap: 48 }}>
                     <button onClick={handleConfirmCapture} style={{ background: '#1976d2', border: 'none', borderRadius: '50%', width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><Check size={32} color="#fff" /></button>
-                    <button onClick={() => setCapturedImg(null)} style={{ background: '#fff', border: '2px solid #1976d2', borderRadius: '50%', width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><XIcon size={32} color="#1976d2" /></button>
+                    <button onClick={handleCancelCapture} style={{ background: '#fff', border: '2px solid #1976d2', borderRadius: '50%', width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><XIcon size={32} color="#1976d2" /></button>
                   </div>
                 </>
               )}
