@@ -428,9 +428,6 @@ export default function Home() {
   };
 
   // 效果生成API调用，上传多图片和prompt
-  /**
-   * 效果生成API调用，上传多图片和prompt
-   */
   const handleEffectGenerate = async () => {
     if (!mainImage || !selectedRef || selectedBtns.length === 0) {
       alert('请上传底图、选择参考图和参考区域');
@@ -472,7 +469,7 @@ export default function Home() {
       console.log(`使用API: ${apiEndpoint}`);
 
       // 添加前端重试逻辑
-      const maxRetries = 2; // 前端最大重试次数
+      const maxRetries = 1; // 最多允许重试一次
       let retries = 0;
       let success = false;
       let lastError = null;
@@ -490,9 +487,14 @@ export default function Home() {
             await new Promise(resolve => setTimeout(resolve, 2000));
           }
 
+          // 设置较长的超时时间，确保大型请求能够完成
+          const controller = new AbortController();
+          const signal = controller.signal;
+
           const res = await fetch(apiEndpoint, {
             method: 'POST',
-            body: formData
+            body: formData,
+            signal
           });
           
           if (!res.ok) {
@@ -546,6 +548,85 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // 添加导出功能
+  const handleExport = async () => {
+    if (!canvasImage) {
+      alert('没有可导出的图片');
+      return;
+    }
+
+    try {
+      // 显示下载中状态
+      setIsProcessing(true);
+      
+      // 判断是否为远程URL（以http或https开头）
+      if (canvasImage.startsWith('http')) {
+        // 对于远程URL，需要先获取图片数据
+        const response = await fetch(canvasImage);
+        const blob = await response.blob();
+        
+        // 创建本地URL
+        const localUrl = URL.createObjectURL(blob);
+        
+        // 创建下载链接
+        const link = document.createElement('a');
+        link.href = localUrl;
+        link.download = `美容效果图_${new Date().getTime()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        
+        // 清理
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(localUrl);
+        }, 100);
+      } else {
+        // 对于本地数据URL，直接下载
+        const link = document.createElement('a');
+        link.href = canvasImage;
+        link.download = `美容效果图_${new Date().getTime()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        
+        // 清理
+        setTimeout(() => {
+          document.body.removeChild(link);
+        }, 100);
+      }
+    } catch (error) {
+      console.error('导出图片失败:', error);
+      alert('导出图片失败，请重试');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 添加"作为底图"功能
+  const handleUseAsBase = () => {
+    if (!canvasImage) {
+      alert('没有可用的图片');
+      return;
+    }
+
+    // 将画布图片设置为底图
+    setMainImage(canvasImage);
+    setMainImgScale(1);
+    setMainImgOffset({ x: 0, y: 0 });
+    
+    // 清空画布
+    setCanvasImage(null);
+    setCanvasImgScale(1);
+    setCanvasImgOffset({ x: 0, y: 0 });
+    
+    // 清空画笔内容
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    setCanvasHistory([]);
   };
 
   return (
@@ -673,7 +754,7 @@ export default function Home() {
         </div>
         {/* 选择参考区域 */}
         <div className={styles.selectArea}>
-          <div style={{ width: '90%', textAlign: 'left', fontSize: 15, fontWeight: 500 }}>
+          <div style={{ width: '90%', textAlign: 'left', fontSize: 18, fontWeight: 500, marginTop: 10, marginBottom: 7 }}>
             选择参考区域
           </div>
           <div className={styles.selectBtns}>
@@ -712,7 +793,7 @@ export default function Home() {
               <input type="color" value={color} onChange={e => setColor(e.target.value)} className={styles.colorPicker} />
             </div>
           </div>
-          <button className={styles.exportBtn} title="导出">
+          <button className={styles.exportBtn} title="导出" onClick={handleExport}>
             <Download size={20} color="#1976d2" /> 导出
           </button>
         </div>
@@ -817,7 +898,7 @@ export default function Home() {
           >
             {isProcessing ? '生成中...' : '效果生成'}
           </button>
-          <button className={styles.actionBtn}>作为底图</button>
+          <button className={styles.actionBtn} onClick={handleUseAsBase}>作为底图</button>
         </div>
         {/* 实时拍摄弹窗 */}
         {showCamera && (

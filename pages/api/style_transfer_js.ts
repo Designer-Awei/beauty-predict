@@ -146,7 +146,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           },
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
-          timeout: 180000 // 3分钟超时
+          timeout: 0
         });
         
         console.log(`API响应状态: ${response.status}`);
