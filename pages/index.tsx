@@ -34,6 +34,13 @@ function dataURLtoFile(dataUrl: string, filename: string): File {
   return new File([u8arr], filename, { type: mime });
 }
 
+// 添加302.AI API配置常量
+const API_BASE_URL = "https://api.302.ai/v1";
+const DEFAULT_MODEL = "gpt-image-1";
+const DEFAULT_QUALITY = "medium";
+// 直接硬编码API密钥
+const API_KEY = "sk-hsH4IwR4zUQHwsGCtQ0R7grXxnJsQ6czIBGwxkrcjqdIsETl";
+
 export default function Home() {
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [customRef, setCustomRef] = useState<string | null>(null);
@@ -427,7 +434,7 @@ export default function Home() {
     setSelectedBtns(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
   };
 
-  // 效果生成API调用，上传多图片和prompt
+  // 修改效果生成API调用函数，直接调用302.AI API
   const handleEffectGenerate = async () => {
     if (!mainImage || !selectedRef || selectedBtns.length === 0) {
       alert('请上传底图、选择参考图和参考区域');
@@ -438,8 +445,8 @@ export default function Home() {
     try {
       // 构造参考区域英文
       const selectedRegionsEn = selectedBtns.map(i => regionMap[referenceBtns[i]]);
-      // 优化后的英文prompt
-      const prompt = `Please use the first image as the base image, and the second image as the reference image. Transfer the features of the selected regions [${selectedRegionsEn.join(', ')}] from the reference image to the base image, while keeping other areas unchanged.`;
+      // 优化后的英文prompt，强调肤色需要与底图保持一致
+      const prompt = `Please use the first image as the base image, and the second image as the reference image. Transfer the features of the selected regions [${selectedRegionsEn.join(', ')}] from the reference image to the base image, while keeping other areas unchanged. IMPORTANT: Ensure that the skin tone remains consistent with the base image and is not altered.`;
 
       // 收集底图和所有参考图（支持多选参考图扩展）
       const images: File[] = [];
@@ -459,92 +466,102 @@ export default function Home() {
         images.push(new File([blob], 'ref.png', { type: blob.type }));
       }
 
+      // 直接调用302.AI API
+      console.log('直接调用302.AI API...');
+      
       // 构造FormData
       const formData = new FormData();
-      images.forEach(file => formData.append('image', file));
       formData.append('prompt', prompt);
-
-      // 使用JS版API
-      const apiEndpoint = '/api/style_transfer_js';
-      console.log(`使用API: ${apiEndpoint}`);
-
-      // 添加前端重试逻辑
-      const maxRetries = 1; // 最多允许重试一次
-      let retries = 0;
-      let success = false;
-      let lastError = null;
-
-      while (retries <= maxRetries && !success) {
-        try {
-          if (retries > 0) {
-            console.log(`前端重试 ${retries}/${maxRetries}...`);
-            // 更新处理中提示
-            const processingElement = document.querySelector('[data-processing-message]') as HTMLElement;
-            if (processingElement) {
-              processingElement.innerText = `正在生成效果，第${retries+1}次尝试...`;
+      formData.append('n', '1');
+      formData.append('size', '1024x1024');
+      formData.append('response_format', 'url');
+      formData.append('model', DEFAULT_MODEL);
+      formData.append('quality', DEFAULT_QUALITY);
+      
+      // 添加图片
+      images.forEach((file, index) => {
+        formData.append('image', file, `image_${index}.png`);
+      });
+      
+      // 发送请求到302.AI API
+      const response = await fetch(`${API_BASE_URL}/images/edits`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`
+        },
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: '解析错误响应失败' }));
+        throw new Error(errorData.error || `服务器返回错误: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // 处理响应
+      if (data && data.data && Array.isArray(data.data)) {
+        if (data.data.length > 0) {
+          const item = data.data[0];
+          if (item && item.url) {
+            console.log(`生成的图片URL: ${item.url}`);
+            
+            // 验证URL是否可访问并处理跨域问题
+            try {
+              // 预加载图片以验证URL是否可访问
+              await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = "anonymous"; // 添加跨域支持
+                img.onload = () => resolve(true);
+                img.onerror = () => reject(new Error("图片加载失败"));
+                img.src = item.url;
+              });
+              
+              // 图片加载成功，设置到画布
+              setCanvasImage(item.url);
+              return;
+            } catch (imgError) {
+              console.error("图片加载失败:", imgError);
+              
+              // 尝试通过代理加载图片
+              try {
+                // 创建一个简单的代理URL（如果需要可以实现）
+                // 或者使用图片URL作为参数调用自己的API
+                const proxyUrl = `/api/image_proxy?url=${encodeURIComponent(item.url)}`;
+                setCanvasImage(proxyUrl);
+                return;
+              } catch (proxyError) {
+                throw new Error("无法加载生成的图片，可能存在跨域问题");
+              }
             }
-            // 等待一段时间再重试
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-
-          // 设置较长的超时时间，确保大型请求能够完成
-          const controller = new AbortController();
-          const signal = controller.signal;
-
-          const res = await fetch(apiEndpoint, {
-            method: 'POST',
-            body: formData,
-            signal
-          });
-          
-          if (!res.ok) {
-            const errorData = await res.json();
-            throw new Error(errorData.error || '服务器返回错误');
-          }
-          
-          const data = await res.json();
-          
-          // 简化处理逻辑，只处理URL
-          if (data.image) {
-            // API返回URL格式的图片
-            setCanvasImage(data.image);
-            success = true;
-          } else {
-            throw new Error('生成失败：' + (data.error || '未知错误'));
-          }
-        } catch (e) {
-          lastError = e;
-          retries++;
-          if (retries > maxRetries) {
-            console.error('达到最大重试次数，放弃重试');
-            break;
           }
         }
       }
-
-      if (!success && lastError) {
-        // 提取更友好的错误信息
-        let errorMessage = String(lastError);
-        
-        // 检查是否包含网络错误信息
-        if (errorMessage.includes('网络连接错误') || errorMessage.includes('Network error')) {
-          alert('生成失败：网络连接错误，请检查您的网络连接或稍后再试');
-        } 
-        // 检查是否包含超时信息
-        else if (errorMessage.includes('超时') || errorMessage.includes('timeout')) {
-          alert('生成失败：请求超时，服务器响应时间过长，请稍后再试');
-        }
-        // API服务器错误
-        else if (errorMessage.includes('API服务器错误')) {
-          alert('生成失败：302.AI服务器暂时不可用，请稍后再试');
-        }
-        // 其他错误
-        else {
-          alert('生成失败：' + errorMessage);
-        }
-      }
+      
+      throw new Error('API响应格式不符合预期');
+      
     } catch (e) {
-      alert('调用失败：' + e);
+      console.error('生成失败:', e);
+      
+      // 提取更友好的错误信息
+      let errorMessage = e instanceof Error ? e.message : String(e);
+      
+      // 检查是否包含网络错误信息
+      if (errorMessage.includes('网络连接错误') || errorMessage.includes('Network error')) {
+        alert('生成失败：网络连接错误，请检查您的网络连接或稍后再试');
+      } 
+      // 检查是否包含超时信息
+      else if (errorMessage.includes('超时') || errorMessage.includes('timeout')) {
+        alert('生成失败：请求超时，服务器响应时间过长，请稍后再试');
+      }
+      // API服务器错误
+      else if (errorMessage.includes('API服务器错误')) {
+        alert('生成失败：302.AI服务器暂时不可用，请稍后再试');
+      }
+      // 其他错误
+      else {
+        alert('生成失败：' + errorMessage);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -850,7 +867,16 @@ export default function Home() {
                 transform: `translate(-50%, -50%) scale(${canvasImgScale}) translate(${canvasImgOffset.x / canvasImgScale}px, ${canvasImgOffset.y / canvasImgScale}px)`,
                 zIndex: 1
               }}
+              crossOrigin="anonymous"
               draggable={false}
+              onError={(e) => {
+                console.error("画布图片加载失败", e);
+                // 如果直接加载失败，尝试通过代理加载
+                if (canvasImage.startsWith('http') && !canvasImage.startsWith('/api/image_proxy')) {
+                  console.log("尝试通过代理加载图片");
+                  setCanvasImage(`/api/image_proxy?url=${encodeURIComponent(canvasImage)}`);
+                }
+              }}
             />
           ) : (
             <span style={{ color: '#666', fontSize: 24 }}>画布与结果呈现区</span>
